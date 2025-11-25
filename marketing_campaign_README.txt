@@ -1,0 +1,1 @@
+Please download the dataset from Kaggle: https://www.kaggle.com/datasets/imakash3011/customer-personality-analysis and place 'marketing_campaign.csv' in the project root before running the notebook.
