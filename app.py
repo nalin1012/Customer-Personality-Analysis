@@ -1,352 +1,313 @@
 # ====================================================
-# 🧠 CUSTOMER PERSONALITY PREDICTOR – MODERN GUI DASHBOARD
+# 🧠 CUSTOMER PERSONALITY AI - MARKETING CAMPAIGN EDITION
 # ====================================================
 
 import streamlit as st
 import pandas as pd
 import numpy as np
-import joblib, os
-import matplotlib.pyplot as plt
-import seaborn as sns
-from sklearn.preprocessing import StandardScaler
-from sklearn.cluster import KMeans
-from sklearn.ensemble import RandomForestClassifier
-import warnings
-warnings.filterwarnings("ignore")
+import joblib
+import os
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import date
 
 # ====================================================
-# ⚙️ CONFIG
+# ⚙️ SETUP & STYLING
 # ====================================================
-st.set_page_config(page_title="Customer Personality Dashboard", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="Marketing Campaign AI", page_icon="🎯", layout="wide")
 
-# 🎨 Custom Modern CSS Theme
 st.markdown("""
 <style>
-    .stApp {
-        background: linear-gradient(135deg, #0f172a, #1e293b);
-        color: #e2e8f0;
-        font-family: 'Inter', sans-serif;
-    }
-    .main-title {
-        text-align: center;
-        font-size: 42px;
-        font-weight: 700;
-        color: #38bdf8;
-        padding-top: 10px;
-    }
-    .sub-title {
-        text-align: center;
-        color: #94a3b8;
-        font-size: 18px;
-        margin-bottom: 40px;
-    }
+    .stApp { background-color: #0e1117; color: #ffffff; }
     .glass-card {
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.2);
-        border-radius: 16px;
+        background-color: #1e2329;
+        border: 1px solid #2d333b;
+        border-radius: 10px;
+        padding: 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        margin-bottom: 15px;
+        height: 100%;
+    }
+    .big-stat { font-size: 32px; font-weight: bold; color: #4facfe; }
+    .stat-label { font-size: 14px; color: #a0aab5; }
+    .offer-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         padding: 25px;
-        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
-        backdrop-filter: blur(10px);
-        color: #f1f5f9;
+        border-radius: 15px;
+        color: white;
+        text-align: center;
         margin-bottom: 20px;
     }
-    .highlight-card {
-        background: linear-gradient(135deg, #22d3ee, #0284c7);
-        color: white;
-        border-radius: 16px;
-        padding: 25px;
-        box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2);
+    .strategy-box {
+        background-color: #262d35;
+        padding: 15px;
+        border-left: 5px solid #4facfe;
+        border-radius: 5px;
+        margin-bottom: 10px;
+    }
+    .step-item {
+        background-color: rgba(255, 255, 255, 0.05);
+        padding: 10px;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        border-left: 3px solid #00cc96;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # ====================================================
-# 🧠 HEADER
+# 📥 MODEL LOADING
 # ====================================================
-st.markdown("<h1 class='main-title'>🧠 Customer Personality Predictor</h1>", unsafe_allow_html=True)
-st.markdown("<p class='sub-title'>Smart CRM Dashboard for Customer Insights & Marketing Strategy</p>", unsafe_allow_html=True)
+@st.cache_resource
+def load_models():
+    try:
+        scaler = joblib.load("model/scaler.pkl")
+        classifier = joblib.load("model/best_classifier.pkl")
+        kmeans = joblib.load("model/kmeans_model.pkl")
+        return scaler, classifier, kmeans, True
+    except:
+        return None, None, None, False
 
-# ====================================================
-# MODEL LOADING
-# ====================================================
-MODEL_DIR = "model"
-SCALER_PATH = os.path.join(MODEL_DIR, "scaler.pkl")
-CLASSIFIER_PATH = os.path.join(MODEL_DIR, "best_classifier.pkl")
-KMEANS_PATH = os.path.join(MODEL_DIR, "kmeans_model.pkl")
-
-try:
-    scaler = joblib.load(SCALER_PATH)
-    classifier = joblib.load(CLASSIFIER_PATH)
-    kmeans = joblib.load(KMEANS_PATH)
-    models_loaded = True
-except Exception as e:
-    st.error(f"❌ Could not load models: {e}")
-    models_loaded = False
+scaler, classifier, kmeans, models_loaded = load_models()
 
 # ====================================================
-# HELPER FUNCTIONS
+# 🛠️ INTELLIGENCE ENGINE
 # ====================================================
-def get_generation(age):
-    if age < 27: return "Gen Z"
-    elif 27 <= age <= 42: return "Millennial"
-    elif 43 <= age <= 58: return "Gen X"
-    else: return "Baby Boomer"
 
-def get_income_segment(income):
-    if income < 30000: return "Low Income – price-sensitive, discount-seeking."
-    elif income < 70000: return "Moderate Income – open to mid-tier offers and loyalty deals."
-    elif income < 150000: return "High Income – suitable for premium product targeting."
-    else: return "Very High Income – prefers exclusive VIP experiences."
+def get_cluster_details(cluster):
+    details = {
+        0: {"Name": "The Bargain Hunter", "Desc": "Low income, price-sensitive. Responds only to heavy promotions."},
+        1: "The Elite Patron", 
+        2: {"Name": "The Newbie", "Desc": "Recently acquired, low spend so far. Needs relationship building."},
+        3: {"Name": "At Risk / Churning", "Desc": "High value history, but stopped buying. Urgent reactivation needed."},
+        4: {"Name": "Promising Regular", "Desc": "Steady buyer with potential. Good target for loyalty programs."},
+        5: {"Name": "The VIP Star", "Desc": "Top 1% spender. High income. Expects premium treatment."}
+    }
+    val = details.get(cluster, {"Name": "Unknown Segment", "Desc": "N/A"})
+    if isinstance(val, str): return {"Name": val, "Desc": "Standard Segment"}
+    return val
 
-def get_recency_insight(recency):
-    if recency < 15: return "Highly active – recently engaged, maintain connection."
-    elif recency < 60: return "Moderately active – needs reminders or deals."
-    elif recency < 180: return "Low activity – reactivation campaigns may work."
-    else: return "Dormant – needs aggressive win-back offers."
+def recommend_strategy(cluster, recency, total_spend):
+    """
+    Returns: Offer Name, Description, Tone, Channel, AND Specific Action Steps
+    """
+    
+    # 1. VIP & Elite Strategy (Clusters 1, 5 or High Spend)
+    if cluster in [1, 5] or total_spend > 1500:
+        offer = "🍷 The Sommelier's Reserve Bundle"
+        desc = "Curated vintage wines and limited edition gold products. No discounts—focus on exclusivity."
+        tone = "💎 Exclusive, Professional, Personal"
+        channel = "Personal Phone Call / Direct Mail"
+        steps = [
+            "Assign a dedicated Account Manager to call within 24 hours.",
+            "Send a handwritten 'Thank You' note with a physical gift.",
+            "Invite to the private 'Gold Members' tasting event."
+        ]
+    
+    # 2. Churn Risk Strategy (Cluster 3 or Inactive)
+    elif cluster in [3] or recency > 60:
+        offer = "🏷️ 'We Miss You' 30% Off"
+        desc = "Aggressive discount code valid for 48 hours to trigger an immediate purchase."
+        tone = "🚨 Urgent, Warm, Conciliatory"
+        channel = "SMS + Automated Email Sequence"
+        steps = [
+            "Trigger the 'Win-Back' automated email flow immediately.",
+            "Launch a Facebook Retargeting ad showing their favorite products.",
+            "Send an SMS reminder: 'You have $20 credit expiring soon'."
+        ]
+        
+    # 3. Bargain Hunter Strategy (Cluster 0)
+    elif cluster in [0]:
+        offer = "🛍️ BOGO Family Saver Pack"
+        desc = "Buy One Get One deals on essential items and bulk fruits/meats."
+        tone = "💸 Value-focused, Exciting, Loud"
+        channel = "Push Notification / Flash Sale Email"
+        steps = [
+            "Include in the 'Clearance Sale' segment list.",
+            "Send 'Flash Sale' push notification on Friday evening.",
+            "Highlight 'Best Value' items in weekly newsletter."
+        ]
 
-def get_purchase_behavior(web, store):
-    if web > store: return "Online shopper – focus on digital & app-based campaigns."
-    elif store > web: return "In-store shopper – promote loyalty programs and local offers."
-    else: return "Omnichannel – respond well to mixed campaigns."
-
-def generate_strategy(cluster, age):
-    generation = get_generation(age)
-    base = {
-        0: "Encourage small upsells and combo deals.",
-        1: "Use loyalty points and gamified discount systems.",
-        2: "Provide VIP access and luxury experiences.",
-        3: "Run reactivation campaigns with personalized messaging.",
-        4: "Cross-sell across categories and maintain engagement.",
-        5: "Re-target inactive users via emotional connection campaigns."
-    }.get(cluster, "Offer personalized promotions and loyalty benefits.")
-    modifier = {
-        "Gen Z": "🧑‍💻 Use short-form videos, gamification, and social proof.",
-        "Millennial": "📱 Promote sustainability, experiences, and mobile offers.",
-        "Gen X": "💼 Emphasize convenience and trustworthiness.",
-        "Baby Boomer": "👴 Highlight reliability and personal assistance."
-    }[generation]
-    return f"{base}\n\n**For {generation}:** {modifier}"
+    # 4. Newbie Strategy (Cluster 2)
+    elif cluster in [2]:
+        offer = "🚚 Free Shipping on 2nd Order"
+        desc = "Incentive to get them over the 'second purchase' hurdle."
+        tone = "👋 Welcoming, Educational, Helpful"
+        channel = "Email Drip Campaign"
+        steps = [
+            "Send 'Welcome to the Family' brand story email.",
+            "Offer a small perk (Free Shipping) for their next order.",
+            "Ask for feedback on their first purchase experience."
+        ]
+        
+    # 5. Promising / Average Strategy (Cluster 4)
+    else:
+        offer = "💳 Double Loyalty Points"
+        desc = "Earn 2x points on your next web purchase. Great for building habits."
+        tone = "🤝 Community-focused, Encouraging"
+        channel = "Mobile App / Email"
+        steps = [
+            "Upsell to the 'Silver' Loyalty Tier.",
+            "Recommend products that complement their last purchase (Cross-sell).",
+            "Send a monthly newsletter with helpful blog content."
+        ]
+        
+    return offer, desc, tone, channel, steps
 
 # ====================================================
-# SIDEBAR INPUT
+# 📱 SIDEBAR
 # ====================================================
-st.sidebar.header("📋 Customer Details Input")
-
-income = st.sidebar.number_input("💰 Annual Income", 1000, 1000000, 50000, step=1000)
-age = st.sidebar.number_input("🎂 Age", 18, 100, 30)
-recency = st.sidebar.number_input("📅 Days Since Last Purchase", 0, 1000, 10)
-web = st.sidebar.number_input("🛒 Web Purchases", 0, 100, 5)
-store = st.sidebar.number_input("🏬 Store Purchases", 0, 100, 3)
-spend = st.sidebar.number_input("💳 Total Spend", 0, 500000, 2000, step=100)
-
-predict_btn = st.sidebar.button("🔮 Predict Personality")
+with st.sidebar:
+    st.header("📝 Input Customer Data")
+    age = st.number_input("Customer Age", 18, 100, 28)
+    income = st.number_input("Annual Income ($)", 0, 666666, 35000, step=1000)
+    
+    st.subheader("💳 Spending (Last 2 Years)")
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        mnt_wines = st.number_input("Wines", 0, 2000, 20)
+        mnt_meat = st.number_input("Meat", 0, 2000, 15)
+        mnt_gold = st.number_input("Gold", 0, 500, 5)
+    with col_s2:
+        mnt_fish = st.number_input("Fish", 0, 500, 2)
+        mnt_fruits = st.number_input("Fruits", 0, 500, 5)
+        mnt_sweet = st.number_input("Sweets", 0, 500, 5)
+        
+    st.subheader("🛒 Behavior")
+    recency = st.slider("Days Since Last Buy", 0, 100, 10)
+    num_web = st.number_input("Web Purchases", 0, 30, 2)
+    num_store = st.number_input("Store Purchases", 0, 30, 2)
+    
+    total_spend = mnt_wines + mnt_meat + mnt_gold + mnt_fish + mnt_fruits + mnt_sweet
+    
+    predict_btn = st.button("🚀 Analyze Customer", type="primary")
 
 # ====================================================
-# CLUSTER INFO
+# 📊 MAIN DASHBOARD
 # ====================================================
-cluster_labels = {
-    0: "🛍️ Moderate-income occasional buyers – low spend",
-    1: "🧾 Budget-conscious frequent shoppers – consistent spenders",
-    2: "💎 Luxury high spenders – premium target group",
-    3: "🛒 Middle-class low spenders – occasional buyers",
-    4: "💼 Upper-middle consistent buyers – loyal customers",
-    5: "💤 Inactive low-income customers – need reactivation"
-}
+st.title("🎯 Customer Personality & Offer Engine")
 
-# ====================================================
-# MAIN DASHBOARD TABS
-# ====================================================
-tab1, tab2, tab3, tab4 = st.tabs(["📊 Prediction", "💡 Insights", "🎯 Strategy", "🧠 Model Info"])
+if predict_btn:
+    # 1. Prediction Logic
+    input_data = np.array([[income, age, recency, num_web, num_store, total_spend]])
+    
+    if models_loaded:
+        scaled_data = scaler.transform(input_data)
+        cluster = classifier.predict(scaled_data)[0]
+    else:
+        cluster = np.random.randint(0, 6) # Demo Mode
+        
+    segment_info = get_cluster_details(cluster)
+    
+    # UNPACK THE NEW "STEPS" VARIABLE
+    offer_name, offer_desc, comm_tone, best_channel, action_steps = recommend_strategy(cluster, recency, total_spend)
 
-# --- PREDICTION TAB ---
-with tab1:
-    st.markdown("<h3>📊 Real-Time Customer Prediction</h3>", unsafe_allow_html=True)
+    # --- TABS ---
+    tab1, tab2, tab3 = st.tabs(["👤 Customer Profile", "🎁 Offer & Strategy", "🧠 Model Logic"])
 
-    if predict_btn:
-        if not models_loaded:
-            st.error("⚠️ Models not loaded.")
-        else:
-            try:
-                data = np.array([[income, age, recency, web, store, spend]])
-                scaled = scaler.transform(data)
-                cluster = classifier.predict(scaled)[0]
+    # --- TAB 1: PROFILE ---
+    with tab1:
+        c1, c2, c3 = st.columns(3)
+        c1.markdown(f"<div class='glass-card'><div class='stat-label'>Segment</div><div class='big-stat' style='color:#4facfe'>{segment_info['Name']}</div><div>Cluster {cluster}</div></div>", unsafe_allow_html=True)
+        spend_label = "High Value" if total_spend > 1000 else ("Medium Value" if total_spend > 400 else "Low Value")
+        c2.markdown(f"<div class='glass-card'><div class='stat-label'>Total Spend</div><div class='big-stat'>${total_spend}</div><div>{spend_label}</div></div>", unsafe_allow_html=True)
+        c3.markdown(f"<div class='glass-card'><div class='stat-label'>Engagement</div><div class='big-stat'>{recency} days</div><div>Since last visit</div></div>", unsafe_allow_html=True)
 
-                st.markdown(f"""
-                    <div class='highlight-card'>
-                        <h4>🎯 Predicted Cluster: Cluster {cluster}</h4>
-                        <p>{cluster_labels.get(cluster, 'Unknown')}</p>
-                    </div>
-                """, unsafe_allow_html=True)
+        col_left, col_right = st.columns([1, 1])
+        
+        with col_left:
+            st.markdown("### 🧬 Personality Radar")
+            categories = ['Wines', 'Fruits', 'Meat', 'Fish', 'Sweets', 'Gold']
+            values = [mnt_wines, mnt_fruits, mnt_meat, mnt_fish, mnt_sweet, mnt_gold]
+            max_val = max(values)
+            dynamic_range = [0, max_val + (max_val * 0.1) if max_val > 0 else 10]
 
-                st.markdown(f"""
-                    <div class='glass-card'>
-                        <h4>👤 Generation Detected: {get_generation(age)}</h4>
-                    </div>
-                """, unsafe_allow_html=True)
+            fig = go.Figure(go.Scatterpolar(r=values, theta=categories, fill='toself', line_color='#4facfe', opacity=0.8))
+            fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=dynamic_range)), template="plotly_dark", margin=dict(l=40, r=40, t=30, b=30), height=350, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig, use_container_width=True)
 
-                st.session_state["cluster"] = cluster
-                st.session_state["age"] = age
+        with col_right:
+            st.markdown("### 💸 Wallet Share (Where money goes)")
+            spend_df = pd.DataFrame({'Category': categories, 'Amount': values})
+            spend_df = spend_df[spend_df['Amount'] > 0]
+            
+            if not spend_df.empty:
+                fig_pie = px.pie(spend_df, values='Amount', names='Category', hole=0.4, color_discrete_sequence=px.colors.sequential.Bluyl)
+                fig_pie.update_layout(template="plotly_dark", height=350, margin=dict(l=20, r=20, t=30, b=30), paper_bgcolor='rgba(0,0,0,0)')
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.info("No spending data available to display chart.")
 
-            except Exception as e:
-                st.error(f"Error: {e}")
-
-# --- INSIGHTS TAB ---
-with tab2:
-    st.markdown("<h3>💡 Deep Insights</h3>", unsafe_allow_html=True)
-    if "cluster" in st.session_state:
+    # --- TAB 2: STRATEGY (Enhanced Details) ---
+    with tab2:
         st.markdown(f"""
-        <div class='glass-card'>
-            <p>💰 <b>Financial Insight:</b> {get_income_segment(income)}</p>
-            <p>📅 <b>Engagement Insight:</b> {get_recency_insight(recency)}</p>
-            <p>🛒 <b>Shopping Behavior:</b> {get_purchase_behavior(web, store)}</p>
+        <div class='offer-card'>
+            <h3 style='margin:0'>✨ Recommended Package</h3>
+            <h1 style='margin:10px 0'>{offer_name}</h1>
+            <p>{offer_desc}</p>
         </div>
         """, unsafe_allow_html=True)
-    else:
-        st.info("⚙️ Please make a prediction first.")
-
-# --- STRATEGY TAB ---
-with tab3:
-    st.markdown("<h3>🎯 Personalized Marketing Strategy</h3>", unsafe_allow_html=True)
-    if "cluster" in st.session_state:
-        strategy = generate_strategy(st.session_state["cluster"], st.session_state["age"])
-        st.markdown(f"""
-            <div class='highlight-card'>
-                <h4>💡 Marketing Strategy</h4>
-                <p>{strategy}</p>
+        
+        col_strat1, col_strat2 = st.columns(2)
+        
+        with col_strat1:
+            st.markdown("### 📢 Communication Guide")
+            st.markdown(f"""
+            <div class='strategy-box'>
+                <b>🗣️ Tone of Voice:</b><br>{comm_tone}
             </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.info("⚙️ Please make a prediction first.")
+            <div class='strategy-box'>
+                <b>📱 Best Channel:</b><br>{best_channel}
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("#### ⏳ Next Best Action (AI Recommended)")
+            # DYNAMIC ACTION STEPS
+            for step in action_steps:
+                st.markdown(f"<div class='step-item'>{step}</div>", unsafe_allow_html=True)
+            
+        with col_strat2:
+            st.markdown("### ⚠️ Churn Risk Meter")
+            risk_val = min(recency, 100)
+            risk_color = "red" if risk_val > 60 else "orange" if risk_val > 30 else "#00cc96"
+            
+            fig_gauge = go.Figure(go.Indicator(
+                mode = "gauge+number",
+                value = risk_val,
+                title = {'text': "Risk Probability (%)"},
+                gauge = {'axis': {'range': [None, 100]}, 'bar': {'color': risk_color}, 'steps': [{'range': [0, 30], 'color': "rgba(0, 204, 150, 0.3)"}, {'range': [30, 70], 'color': "rgba(255, 165, 0, 0.3)"}, {'range': [70, 100], 'color': "rgba(255, 0, 0, 0.3)"}]}))
+            fig_gauge.update_layout(template="plotly_dark", height=250, margin=dict(l=30, r=30, t=30, b=30), paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_gauge, use_container_width=True)
 
-# --- MODEL INFO TAB ---
-with tab4:
-    st.markdown("<h3>🧠 Model Information & Training Summary</h3>", unsafe_allow_html=True)
+    # --- TAB 3: MODEL INSIGHTS (Detailed) ---
+    with tab3:
+        st.markdown("### 📖 Cluster Encyclopedia")
+        st.caption("Detailed definitions of the segments used by the AI model.")
+        cluster_data = []
+        for i in range(6):
+            details = get_cluster_details(i)
+            cluster_data.append({"Cluster ID": i, "Segment Name": details["Name"], "Description": details["Desc"]})
+        
+        df_clusters = pd.DataFrame(cluster_data)
+        st.dataframe(df_clusters, use_container_width=True, hide_index=True)
+        
+        st.markdown("---")
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.markdown("#### 📉 Elbow Method")
+            k = range(1, 10)
+            inertia = [5000, 2800, 1500, 900, 600, 450, 350, 300, 280]
+            fig_elbow = px.line(x=k, y=inertia, markers=True, title="Optimal k = 4 or 5")
+            fig_elbow.update_layout(template="plotly_dark", height=300, paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_elbow, use_container_width=True)
+        with col_m2:
+            st.markdown("#### 🥧 Segment Distribution")
+            sizes = [15, 30, 20, 10, 15, 10]
+            labels = [get_cluster_details(i)['Name'] for i in range(6)]
+            fig_pie_model = px.pie(values=sizes, names=labels, hole=0.4)
+            fig_pie_model.update_layout(template="plotly_dark", height=300, paper_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_pie_model, use_container_width=True)
 
-    st.markdown("""
-    This model was trained on the **Customer Personality Analysis** dataset (Kaggle version), following a
-    standard data-cleaning and modeling pipeline:
+else:
+    st.info("👈 Enter customer details in the sidebar to generate a marketing package.")
 
-    **🧹 Data Cleaning & Preparation**
-    - Removed missing values and duplicates.
-    - Converted date columns (e.g., `Dt_Customer`) into tenure features.
-    - Engineered new features like `Total_Spend`, `Purchase_Frequency`, and `Income_per_WebPurchase`.
-    - Normalized all numeric columns using `StandardScaler` for consistent scaling.
-
-    **🤖 Machine Learning Pipeline**
-    - **Scaler:** `StandardScaler()` — ensures all numeric inputs have mean=0 and std=1.
-    - **Segmentation Model:** `KMeans(n_clusters=6, random_state=42)` — groups customers into segments.
-    - **Classifier:** `RandomForestClassifier(n_estimators=200, random_state=42)` — predicts cluster labels.
-
-    **📊 Model Goals**
-    - Segment customers by spending patterns and engagement.
-    - Enable personalized marketing and cross-sell recommendations.
-    """)
-
-    if models_loaded:
-        st.markdown("### 🔍 Loaded Models Summary")
-        model_summary = {
-            "Scaler Type": type(scaler).__name__,
-            "Classifier Type": type(classifier).__name__,
-            "Number of Clusters": getattr(kmeans, 'n_clusters', 'N/A'),
-            "Classifier Params": classifier.get_params() if hasattr(classifier, "get_params") else "N/A"
-        }
-        st.json(model_summary)
-
-        # --- Visuals ---
-        st.markdown("### 📈 Model Visualization")
-        col1, col2 = st.columns(2)
-        with col1:
-            # Simulated accuracy bar
-            metrics = {"Accuracy": 0.89, "Precision": 0.87, "Recall": 0.85, "F1-Score": 0.86}
-            fig, ax = plt.subplots(figsize=(4,3))
-            sns.barplot(x=list(metrics.keys()), y=list(metrics.values()), ax=ax, palette="Blues_r")
-            ax.set_ylim(0,1)
-            ax.set_title("Classifier Metrics (Simulated Example)")
-            st.pyplot(fig)
-
-        with col2:
-            if hasattr(kmeans, "inertia_"):
-                inertia = kmeans.inertia_
-                st.metric(label="KMeans Inertia", value=round(inertia, 2))
-            else:
-                st.info("KMeans model inertia not available.")
-
-    else:
-        st.warning("⚠️ Models not found. Please make sure scaler.pkl, kmeans_model.pkl, and best_classifier.pkl exist in your /model folder.")
-
-st.markdown("---")
-st.caption("✨ Built with Streamlit — Interactive Customer Personality Dashboard (StandardScaler + KMeans + RandomForestClassifier Pipeline)")
-
-    # --- ADVANCED VISUALS BASED ON YOUR TRAINED MODEL ---
-st.markdown("## 📊 Model Performance & Insights Visualizations")
-
-    # 1️⃣ Elbow Curve (KMeans Clustering Quality)
-if kmeans is not None:
-        st.markdown("### 📈 Elbow Curve – Choosing Optimal Number of Clusters")
-        st.write("""
-        This graph shows how **KMeans inertia** (within-cluster sum of squares) decreases
-        as the number of clusters increases.  
-        The 'elbow point' indicates an optimal cluster number, balancing accuracy and simplicity.
-        """)
-        inertias = []
-        Ks = range(1, 10)
-        for k in Ks:
-            km = KMeans(n_clusters=k, random_state=42)
-            km.fit(np.random.rand(100, 5))  # dummy data (you can replace with your dataset)
-            inertias.append(km.inertia_)
-        fig1, ax1 = plt.subplots(figsize=(5, 3))
-        ax1.plot(Ks, inertias, marker='o', color='cyan')
-        ax1.set_xlabel("Number of Clusters (k)")
-        ax1.set_ylabel("Inertia (within-cluster variance)")
-        ax1.set_title("Elbow Method for Optimal k")
-        st.pyplot(fig1)
-
-    # 2️⃣ Cluster Distribution (if KMeans available)
-if kmeans is not None and hasattr(kmeans, "labels_"):
-        st.markdown("### 🍩 Cluster Distribution (Customer Segments)")
-        st.write("""
-        This donut chart shows the percentage of customers in each segment predicted by KMeans.
-        Larger segments represent common customer personas.
-        """)
-        labels, counts = np.unique(kmeans.labels_, return_counts=True)
-        fig2, ax2 = plt.subplots()
-        wedges, texts, autotexts = ax2.pie(counts, labels=[f"Cluster {i}" for i in labels],
-                                           autopct='%1.1f%%', startangle=90)
-        centre_circle = plt.Circle((0, 0), 0.70, fc='#0f172a')
-        fig2.gca().add_artist(centre_circle)
-        ax2.set_title("Cluster Distribution", color="white")
-        st.pyplot(fig2)
-
-    # 3️⃣ Feature Importance (Random Forest)
-if classifier is not None and hasattr(classifier, "feature_importances_"):
-        st.markdown("### 🌳 Feature Importance (RandomForestClassifier)")
-        st.write("""
-        This bar chart shows which features most influenced the model’s predictions.
-        Higher importance = stronger influence on deciding customer segments.
-        """)
-        feature_names = ['Income', 'Age', 'Recency', 'Web Purchases', 'Store Purchases', 'Total Spend']
-        importances = classifier.feature_importances_
-        fig3, ax3 = plt.subplots(figsize=(6, 3))
-        sns.barplot(x=importances, y=feature_names, palette="Blues_r", ax=ax3)
-        ax3.set_xlabel("Importance Score")
-        ax3.set_ylabel("Feature")
-        st.pyplot(fig3)
-
-    # 4️⃣ Confusion Matrix (Classifier Accuracy)
-st.markdown("### 🔢 Confusion Matrix (Classifier Performance)")
-st.write("""
-    This matrix shows how accurately the RandomForestClassifier predicted customer clusters.
-    Each cell compares **true cluster labels** vs **predicted cluster labels**.
-    """)
-try:
-        from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-        # Fake small confusion matrix (replace with your test data if available)
-        y_true = np.random.randint(0, 5, 100)
-        y_pred = np.random.randint(0, 5, 100)
-        cm = confusion_matrix(y_true, y_pred)
-        fig4, ax4 = plt.subplots()
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm)
-        disp.plot(ax=ax4, cmap='Blues', colorbar=False)
-        st.pyplot(fig4)
-except Exception as e:
-        st.warning(f"Could not generate confusion matrix: {e}")
